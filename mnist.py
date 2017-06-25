@@ -1,5 +1,6 @@
 import os
 import gzip
+import urllib.request
 import numpy as np
 from collections import OrderedDict
 
@@ -13,7 +14,7 @@ DICT_FILES = {
 }
 IMAGE_OFFSET = 16
 LABEL_OFFSET = 8
-DATA_DIR = "./data"
+DATA_DIR = "./"
 IMAGE_SIZE = 28
 
 
@@ -33,20 +34,14 @@ def load_data(filename):
         offset = LABEL_OFFSET
         length = 1
 
-    with gzip.open(os.sep.join((DATA_DIR, filename)), "rb") as file_:
+    filepath = os.sep.join((DATA_DIR, filename))
+    if not os.path.exists(filepath):
+        print("Downloading {}".format(filename))
+        urllib.request.urlretrieve(URL+filename, filepath)
+        print("Done!")
+    with gzip.open(filepath, "rb") as file_:
         data = np.frombuffer(file_.read(), np.uint8, offset=offset)
     return data.reshape(-1, length)
-
-
-def xavier_init(shape):
-    """ xavier initialization
-    """
-    std = np.sqrt(1/shape[0])
-    if len(shape) == 1:
-        x = std * np.random.randn(shape[0])
-    else:
-        x = std * np.random.randn(shape[0], shape[1])
-    return x
 
 
 def he_init(shape):
@@ -106,6 +101,7 @@ class Softmax:
         """ backward
         """
         # diff = self.y - (diff * self.y)
+        # Softmax differential is calculated with loss part.
         return diff
 
 
@@ -181,11 +177,12 @@ class NN3Layer:
         return out
 
     def loss(self, y_pred, y_true):
-        """ cross entropy loss
+        """ softmax cross entropy loss
         """
         batch_size = y_pred.shape[0]
         y_true = y_true.reshape([1, batch_size])
         cross_entropy = -np.sum(np.log(y_pred[np.arange(batch_size), y_true]))
+        cross_entropy /= batch_size
         diff = y_pred.copy()
         diff[np.arange(batch_size), y_true] -= 1
         diff = diff / batch_size
@@ -234,13 +231,13 @@ class NN3Layer:
             # batches
             for i, (from_, to_) in enumerate(ranges):
                 x_batch = X[train_indexes[from_: to_]]
-                y_true = Y[train_indexes[from_: to_]]
+                y_batch = Y[train_indexes[from_: to_]]
                 y_pred = self.feedforward(x_batch)
-                loss_batch, diff_batch = self.loss(y_pred, y_true)
+                loss_batch, diff_batch = self.loss(y_pred, y_batch)
                 self.feedbackward(diff_batch)
                 self.update(learning_rate)
                 list_loss.append(loss_batch)
-                list_acc.append(self.accuracy(y_pred, y_true))
+                list_acc.append(self.accuracy(y_pred, y_batch))
 
             train_message = \
                 "epoch:{}, train_loss:{:.4f}, acc:{:.4f}".format(
@@ -257,10 +254,11 @@ class NN3Layer:
                     )
             print(train_message)
 
-    def save(self):
-        """ save
+    def predict(self, x):
+        """ predict
         """
-        pass
+        y_pred = self.feedforward(x)
+        return y_pred
 
 
 if __name__ == "__main__":
@@ -273,13 +271,21 @@ if __name__ == "__main__":
     network = NN3Layer(n_hidden1=128, n_hidden2=64, n_hidden3=10)
 
     # train network
+    epoch = 30
+    batch_size = 10
+    print("Start training. Epoch={}, batch_size={}".format(epoch, batch_size))
     sep_ind = int(len(train_images) * 0.8)
     train_X = train_images[:sep_ind]
     train_Y = train_labels[:sep_ind]
     val_X = train_images[sep_ind:]
     val_Y = train_labels[sep_ind:]
     network.train(train_X, train_Y, val_X=val_X, val_Y=val_Y,
-                  batch_size=16, epoch=30)
+                  batch_size=batch_size, epoch=epoch)
 
-    # save model
-    network.save()
+    # test
+    test_images = load_data(DICT_FILES["test_image"])
+    test_labels = load_data(DICT_FILES["test_label"])
+    print("Testing.")
+    test_y = network.predict(test_images)
+    test_accuracy = network.accuracy(test_y, test_labels)
+    print("Test accuracy is {:.4f}".format(test_accuracy))
