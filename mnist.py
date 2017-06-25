@@ -147,10 +147,11 @@ class FC:
 class NN3Layer:
     """ 3-layer Neural Network
     """
-    def __init__(self, n_hidden1, n_hidden2):
+    def __init__(self, n_hidden1, n_hidden2, n_hidden3):
         self.input_shape = [None, IMAGE_SIZE*IMAGE_SIZE]
         self.n_hidden1 = n_hidden1
         self.n_hidden2 = n_hidden2
+        self.n_hidden3 = n_hidden3
 
         self.layers = OrderedDict()
         self._network_init()
@@ -165,7 +166,11 @@ class NN3Layer:
         self.layers["FC2"] = FC(self.layers["FC1"].output_shape,
                                 self.n_hidden2,
                                 he_init)
-        self.layers["Activation2"] = Softmax()
+        self.layers["Activation2"] = Relu()
+        self.layers["FC3"] = FC(self.layers["FC2"].output_shape,
+                                self.n_hidden3,
+                                he_init)
+        self.layers["Activation3"] = Softmax()
 
     def feedforward(self, x):
         """ feedforward
@@ -202,7 +207,16 @@ class NN3Layer:
             if hasattr(layer, "update"):
                 layer.update(learning_rate)
 
-    def train(self, X, Y,
+    def accuracy(self, y_pred, y_true):
+        """ accuracy
+        """
+        batch_size = y_pred.shape[0]
+        answer_t = y_true.reshape(batch_size)
+        answer_p = y_pred.argmax(axis=1)
+        acc = np.sum(answer_t == answer_p)/batch_size
+        return acc
+
+    def train(self, X, Y, val_X=None, val_Y=None,
               batch_size=1, epoch=1,
               shuffle=True, learning_rate=0.0001):
         """ train
@@ -215,6 +229,8 @@ class NN3Layer:
         for ep in range(epoch):
             if shuffle:
                 np.random.shuffle(train_indexes)
+            list_acc = list()
+            list_loss = list()
             # batches
             for i, (from_, to_) in enumerate(ranges):
                 x_batch = X[train_indexes[from_: to_]]
@@ -223,16 +239,29 @@ class NN3Layer:
                 loss_batch, diff_batch = self.loss(y_pred, y_true)
                 self.feedbackward(diff_batch)
                 self.update(learning_rate)
-            print(
-                "epoch:{}, train_loss:{:.4f}".format(
-                    ep, loss_batch
+                list_loss.append(loss_batch)
+                list_acc.append(self.accuracy(y_pred, y_true))
+
+            train_message = \
+                "epoch:{}, train_loss:{:.4f}, acc:{:.4f}".format(
+                    ep, np.mean(list_loss), np.mean(list_acc)
                 )
-            )
+
+            if val_X is not None and val_Y is not None:
+                y_val_pred = self.feedforward(val_X)
+                loss_val, diff_val = self.loss(y_val_pred, val_Y)
+                acc_val = self.accuracy(y_val_pred, val_Y)
+                train_message += \
+                    "  val_loss:{:.4f}, val_acc:{:.4f}".format(
+                        loss_val, acc_val
+                    )
+            print(train_message)
 
     def save(self):
         """ save
         """
         pass
+
 
 if __name__ == "__main__":
 
@@ -241,10 +270,16 @@ if __name__ == "__main__":
     train_labels = load_data(DICT_FILES["train_label"])
 
     # create network architecture
-    network = NN3Layer(n_hidden1=64, n_hidden2=10)
+    network = NN3Layer(n_hidden1=128, n_hidden2=64, n_hidden3=10)
 
     # train network
-    network.train(train_images, train_labels, batch_size=17, epoch=10)
+    sep_ind = int(len(train_images) * 0.8)
+    train_X = train_images[:sep_ind]
+    train_Y = train_labels[:sep_ind]
+    val_X = train_images[sep_ind:]
+    val_Y = train_labels[sep_ind:]
+    network.train(train_X, train_Y, val_X=val_X, val_Y=val_Y,
+                  batch_size=16, epoch=30)
 
     # save model
     network.save()
